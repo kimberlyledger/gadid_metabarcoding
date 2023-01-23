@@ -1,0 +1,104 @@
+---
+title: "filter tracking"
+author: "Kimberly Ledger"
+date: "2023-01-18"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+
+### read in dada2 sequence filtering output 
+```{r}
+track_S1 <- read.csv("/genetics/edna/workdir/gadids/20230111/S1_ND1_529_789/trimmed/filtered/outputs/track.csv") %>%
+  mutate(primer_set = "S1")
+track_S2 <- read.csv("/genetics/edna/workdir/gadids/20230111/S2_ND1_651_862/trimmed/filtered/outputs/track.csv") %>%
+  mutate(primer_set = "S2")
+track_S3 <- read.csv("/genetics/edna/workdir/gadids/20230111/S3_ND5_547_800/trimmed/filtered/outputs/track.csv") %>%
+  mutate(primer_set = "S3")
+track_S4 <- read.csv("/genetics/edna/workdir/gadids/20230111/S4_COX3_422v1_598/trimmed/filtered/outputs/track.csv") %>%
+  mutate(primer_set = "S4")
+track_S5 <- read.csv("/genetics/edna/workdir/gadids/20230111/S5_COX3_422v2_598/trimmed/filtered/outputs/track.csv") %>%
+  mutate(primer_set = "S5")
+```
+
+### read in gadid metadata 
+```{r}
+metadata <- read.csv("/genetics/edna/workdir/gadids/20230111/20230111_gadidmetadata.csv")
+
+#illumina output changed "_" to "-"
+metadata$SampleID <- gsub("_", "-", metadata$SampleID) 
+```
+
+### join to metadata
+```{r}
+track_all <- bind_rows(track_S1, track_S2, track_S3, track_S4, track_S5) %>%
+  rename(SampleID = X)
+
+join <- metadata %>%
+  filter(primer_set != "S6") %>%
+  left_join(track_all, by = c("SampleID", "primer_set"))
+
+join$primer_set <- as.factor(join$primer_set)
+join$shortID <- as.factor(join$shortID)
+join$replicate <- as.factor(join$replicate)
+join$seq_depth <- as.factor(join$seq_depth)
+
+summary(join)
+```
+
+### okay, i'll filter out the non mock community samples and all blanks for this 
+```{r}
+mytab <- join %>%
+  filter(seq_depth != "NA") %>%
+  filter(shortID != "B") %>%
+  filter(input > 5) %>%
+  mutate(prop_retained = nonchim/input)
+```
+
+
+```{r}
+mytab %>%
+  ggplot(aes(x = primer_set, y = prop_retained, color = primer_set)) +
+  geom_boxplot() +
+  geom_jitter(position = position_jitter(0.15)) + 
+  theme_bw() +
+  labs(
+    y = "proportion reads assigned to an ASV",
+    x = "primer set",
+    title = "read retention")
+```
+
+
+### any mock community specific bias? 
+
+```{r}
+mytab %>%
+  ggplot(aes(x = shortID, y = prop_retained, color = primer_set)) +
+  geom_boxplot() +
+  geom_jitter(position = position_jitter(0.15)) + 
+  facet_grid(~primer_set, scales = 'free') + 
+  theme_bw() +
+  labs(
+    y = "proportion of reads assigned to an ASV",
+    x = "primer set",
+    title = "read retention by mock community")
+```
+
+
+
+
+
+
+
+
+
+
+
+
