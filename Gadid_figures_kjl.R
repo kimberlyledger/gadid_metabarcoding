@@ -1,25 +1,45 @@
-# Compile fits for Ocean fish data and make figures of Ocean data for the publication.
+#### this code originated from Shelton et al. supplementary materials ####
+#### i have modified to fit my data requirements ####
+
+### this cold plots figures for gadid_estimations ### 
+
 library(tidyverse)
 library(data.table)
 library(gridExtra)
 library(ggsci)
-library(robCompositions)  #this didn't install.. let's see what it is needed for later on 
+#library(robCompositions)  #this didn't install.. let's see what it is needed for later on 
+
 
 # Read in the posteriors for the 
-load("/home/kimberly.ledger/eDNA_metabarcoding/gadid_20220111/gadid_S1_raw.Rdata")
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S1_raw.Rdata")
+# raw <- Output
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S1_mock_E_N1_S1.Rdata")
+# mock1 <- Output # This is the cross validation that uses E, N1, and S1 mock communities 
+
+# Read in the posteriors for the 
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S2_raw.Rdata")
+# raw <- Output
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S2_mock_E_N1_S1.Rdata")
+# mock1 <- Output # This is the cross validation that uses E, N1, and S1 mock communities 
+
+# Read in the posteriors for the 
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S3_raw.Rdata")
+# raw <- Output
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S3_mock_E_N1_S1.Rdata")
+# mock1 <- Output # This is the cross validation that uses E, N1, and S1 mock communities 
+
+# Read in the posteriors for the 
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S4_raw.Rdata")
+# raw <- Output
+# load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S4_mock_E_N1_S1.Rdata")
+# mock1 <- Output # This is the cross validation that uses E, N1, and S1 mock communities 
+
+# Read in the posteriors for the 
+load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S5_raw.Rdata")
 raw <- Output
-load("/home/kimberly.ledger/eDNA_metabarcoding/gadid_20220111/gadid_S1_mock_E_N1_S1.Rdata")
+load("/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/gadid_S5_mock_E_N1_S1.Rdata")
 mock1 <- Output # This is the cross validation that uses E, N1, and S1 mock communities 
 
-#load("./data/summarized_data/Fish_Oceanic_and_North_mock_2_crossValidate_Skew.Rdata")
-#mock2 <- Output # This is the cross validation that uses only the 39 cycle even communities
-#load("./data/summarized_data/Fish_Oceanic_and_North_VAR_PCR_crossValidate_Skew.Rdata")
-#var_pcr <- Output
-
-# mock1 - many tau, all even communities
-# mock2 - many tau, single 39 cycle even communities
-# mock3 - single tau, all even communities
-# mock4 - single tau, single 39 cycle even communities
 
 #########################################################
 # Raw estimates from Reads
@@ -31,7 +51,7 @@ raw.raw <- raw$env %>%
          true.prop = start_conc_ng / sum.ng) %>%
   ungroup() %>%
   group_by(Species,community,Cycles,true.prop) %>%
-  summarise(simple.Mean=mean(propReads),
+  summarize(simple.Mean=mean(propReads),
             simple.N = length(tech_rep)) %>%
   replace_na(list(raw.Mean=0,raw.SD=0,raw.SE=0))
 
@@ -64,7 +84,7 @@ mock1.raw <- mock1$env %>% group_by(community,Cycles,tech_rep) %>%
              true.prop = start_conc_ng / sum.ng) %>%
       ungroup() %>%
       group_by(Species,community,Cycles,true.prop) %>%
-  summarise(simple.Mean=mean(propReads),
+  summarize(simple.Mean=mean(propReads),
             simple.N = length(tech_rep)) %>%
   replace_na(list(raw.Mean=0,raw.SD=0,raw.SE=0))
 
@@ -88,84 +108,13 @@ mock1.post <-expand.grid(comm_idx = COM$comm_idx,sp_idx =SP$sp_idx) %>%
 # Combine the raw estimates and posterior estimates
 mock1.all <- full_join(mock1.raw,mock1.post)
 
-#########################################################
-# Mock2
-#########################################################
-# summarize raw estimates from reads for each species.
-mock2.raw <- mock2$env %>% group_by(community,Cycles,tech_rep) %>%
-  mutate(sum.ng = sum(start_conc_ng),
-         true.prop = start_conc_ng / sum.ng) %>%
-  ungroup() %>%
-  group_by(Species,community,Cycles,true.prop) %>%
-  summarise(simple.Mean=mean(propReads),
-            simple.N = length(tech_rep)) %>%
-  replace_na(list(raw.Mean=0,raw.SD=0,raw.SE=0))
-
-# extract predicted proportions from the posterior
-COM <- data.frame(community = levels(mock2$env$community %>% as.factor()))
-COM$comm_idx <- 1:nrow(COM)
-SP  <- mock2$env %>% distinct(Species,sp_idx) %>% as.data.frame()
-
-# These are the predicted intercepts for the posteriors
-beta_posterior <- mock2$stanMod_summary[["int_samp_small"]][, c(1,4:8)]
-colnames(beta_posterior) <- paste0("mock2.",substr(colnames(beta_posterior),1,nchar(colnames(beta_posterior))-1))
-colnames(beta_posterior)[1] <- "mock2.mean"
-beta_posterior <- as.data.frame(beta_posterior)
-
-mock2.post <-expand.grid(comm_idx = COM$comm_idx,sp_idx =SP$sp_idx) %>% 
-  arrange(comm_idx,sp_idx) %>% 
-  left_join(.,COM) %>% 
-  left_join(.,SP) %>% 
-  bind_cols(.,beta_posterior)
-
-# Combine the raw estimates and posterior estimates
-mock2.all <- full_join(mock2.raw,mock2.post)
-
-#########################################################
-# VAR PCR
-#########################################################
-# summarize raw estimates from reads for each species.
-pcr.raw <- var_pcr$env %>% group_by(community,Cycles,tech_rep) %>%
-  mutate(sum.ng = sum(start_conc_ng),
-         true.prop = start_conc_ng / sum.ng) %>%
-  ungroup() %>%
-  group_by(Species,community,Cycles,true.prop) %>%
-  summarise(simple.Mean=mean(propReads),
-            simple.N = length(tech_rep)) %>%
-  replace_na(list(raw.Mean=0,raw.SD=0,raw.SE=0))
-
-# extract predicted proportions from the posterior
-COM <- data.frame(community = levels(var_pcr$env$community %>% as.factor()))
-COM$comm_idx <- 1:nrow(COM)
-SP  <- var_pcr$env %>% distinct(Species,sp_idx) %>% as.data.frame()
-
-# These are the predicted intercepts for the posteriors
-beta_posterior <- var_pcr$stanMod_summary[["int_samp_small"]][, c(1,4:8)] 
-colnames(beta_posterior) <- paste0("pcr.",substr(colnames(beta_posterior),1,nchar(colnames(beta_posterior))-1))
-colnames(beta_posterior)[1] <- "pcr.mean"
-
-beta_posterior <- as.data.frame(beta_posterior)
-
-pcr.post <-expand.grid(comm_idx = COM$comm_idx,sp_idx =SP$sp_idx) %>% 
-  arrange(comm_idx,sp_idx) %>% 
-  left_join(.,COM) %>% 
-  left_join(.,SP) %>% 
-  bind_cols(.,beta_posterior)
-
-# Combine the raw estimates and posterior estimates
-pcr.all <- full_join(pcr.raw,pcr.post)
 
 ########################################################################
 ########################################################################
 ########################################################################
 ########################################################################
 
-# Combine mock and pcr_var results with raw reads.
-# result.dat <- left_join(mock1.all,mock2.all) %>%
-#               left_join(.,
-#                         pcr.all %>% dplyr::select(-comm_idx,-sp_idx)) %>%
-#               left_join(.,
-#                         raw.all %>% dplyr::select(-comm_idx,-sp_idx))
+# Combine mock results with raw reads.
 
 result.dat <- left_join(mock1.all,raw.all)
 
@@ -227,12 +176,7 @@ skew_plot <- function(dat,
                        ymin= mock1.2.5, 
                        ymax= mock1.97.5, color = true.prop),width=0,alpha=0.5)   +
      geom_point(aes(x=2+offset,mock1.mean, #shape=true.prop,
-                    fill=true.prop,color=true.prop)) +
-    # mock with mock communities at single PCR
-    #geom_errorbar(aes(x=2+offset,
-    #                  ymin= mock2.2.5, 
-    #                  ymax= mock2.97.5,color=true.prop),width=0,alpha=0.75)   +
-    #geom_point(aes(x=2+offset,mock2.mean,shape=true.prop,fill=true.prop,color=true.prop),size=2) +
+                    fill=true.prop,color=true.prop), size=2) +
     #scale_shape_manual(values =c(21,22)) +
     #scale_fill_manual(values= col.val, "True value") +
     #scale_color_manual(values= col.val,"True value") +
@@ -262,11 +206,18 @@ S2_plot <- skew_plot(dat=S2.dat,
 
 
 
-grid.arrange(M1_plot + ggtitle(NULL,subtitle="Middle1"),
+p3 <- grid.arrange(M1_plot + ggtitle(NULL,subtitle="Middle1"),
               N2_plot +ggtitle(NULL,subtitle="North2"),
               S2_plot + ggtitle(NULL,subtitle="South2"),
-              ncol=3,nrow=1
-              )
+              ncol=3,nrow=1)
+
+#ggsave(p3, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S1_meanestimates.pdf", width = 9, height = 5, units = "in")
+#ggsave(p3, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S2_meanestimates.pdf", width = 9, height = 5, units = "in")
+#ggsave(p3, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S3_meanestimates.pdf", width = 9, height = 5, units = "in")
+#ggsave(p3, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S4_meanestimates.pdf", width = 9, height = 5, units = "in")
+#ggsave(p3, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S5_meanestimates.pdf", width = 9, height = 5, units = "in")
+
+
 
 ####################################################33
 # Calculate Aitchison Distance
@@ -286,8 +237,7 @@ make.cont <- function(dat){
 
 raw.out <- make.cont(raw.post)
 mock1.out <- make.cont(mock1.post)
-#mock2.out <- make.cont(mock2.post)
-#pcr.out <- make.cont(pcr.post)
+
 
 raw.sp   <- data.frame(Species=raw.post %>% distinct(Species) %>% pull(Species))
 raw.comm <- data.frame(community=raw.post %>% distinct(community) %>% pull(community))
@@ -295,8 +245,6 @@ raw.comm <- data.frame(community=raw.post %>% distinct(community) %>% pull(commu
 mock.sp   <- data.frame(Species=mock1.post %>% distinct(Species) %>% pull(Species))
 mock.comm <- data.frame(community=mock1.post %>% distinct(community) %>% pull(community))
 
-#pcr.sp   <- data.frame(Species=pcr.post %>% distinct(Species) %>% pull(Species))
-#pcr.comm <- data.frame(community=pcr.post %>% distinct(community) %>% pull(community))
 
 
 # make true.matrix
@@ -310,7 +258,7 @@ true.mat <- result.dat %>%
 rownames(true.mat) <- true.mat$community
 true.mat <-  true.mat %>% ungroup() %>% dplyr::select(-community)
 
-#####################################################################    resume here! 
+#####################################################################   
 
 # so i can't get robCompositions to install now so switching to another package... 
 library(coda.base)
@@ -361,63 +309,18 @@ for(i in 1:dim(mock1$pars$int_samp_small)[1]){
 }
 
 
-### 
-
-# loop over mock1
-# mock2.AD <- data.frame(matrix(0,dim(mock2$pars$int_samp_small)[1],nrow(true.mat)))
-# colnames(mock2.AD) <- rownames(true.mat)
-# for(i in 1:dim(mock2$pars$int_samp_small)[1]){
-#   mock.a <- mock2$pars$int_samp_small[i,,] %>% as.data.frame()
-#   rownames(mock.a) <- mock.comm$community 
-#   colnames(mock.a) <- mock.sp$Species
-#   mock.b <- mock.a %>% 
-#     filter(rownames(.) %in% result.dat$community)%>%
-#     dplyr::select(result.dat$Species) 
-#   
-#   for(j in 1:nrow(mock.b)){
-#     these <- which(true.mat[j,]>0)
-#     true <- true.mat[j,these]
-#     mock.c <- mock.b[j,these] / sum(mock.b[j,these])
-#     
-#     mock2.AD[i,rownames(true.mat)[j]] <-  aDist(true,mock.c)
-#   }
-#   #print(i)
-# }
-
-# loop over pcr
-# pcr.AD <- data.frame(matrix(0,dim(var_pcr$pars$int_samp_small)[1],nrow(true.mat)))
-# colnames(pcr.AD) <- rownames(true.mat)
-# for(i in 1:dim(var_pcr$pars$int_samp_small)[1]){
-#   pcr.a <- var_pcr$pars$int_samp_small[i,,] %>% as.data.frame()
-#   rownames(pcr.a) <- pcr.comm$community 
-#   colnames(pcr.a) <- pcr.sp$Species
-#   pcr.b <- pcr.a %>% 
-#     filter(rownames(.) %in% result.dat$community)%>%
-#     dplyr::select(result.dat$Species) 
-#   
-#   for(j in 1:nrow(pcr.b)){
-#     these <- which(true.mat[j,]>0)
-#     true <- true.mat[j,these]
-#     pcr.c <- pcr.b[j,these] / sum(pcr.b[j,these])
-#     
-#     pcr.AD[i,rownames(true.mat)[j]] <-  aDist(true,pcr.c)
-#   }
-#   print(i)
-# }
-
 raw.AD$model <- "raw"
 mock1.AD$model <- "mock1"
-#mock2.AD$model <- "mock2"
-#pcr.AD$model <- "pcr"
 
-all.AD <- bind_rows(raw.AD,mock1.AD) #%>% bind_rows(.,mock2.AD) %>% bind_rows(.,pcr.AD)
+
+all.AD <- bind_rows(raw.AD,mock1.AD)
 
 all.AD <- all.AD %>% 
               pivot_longer(.,-model,
                            names_to="community",
                            values_to = "val")
 all.AD.sum <- all.AD %>% group_by(model,community) %>% 
-                summarise(Mean = mean(val),
+                summarize(Mean = mean(val),
                           SD=sd(val),
                           q.025 = quantile(val,probs=0.025),
                           q.05 = quantile(val,probs=0.05),
@@ -428,16 +331,8 @@ all.AD.sum <- all.AD %>% group_by(model,community) %>%
                 ungroup() %>%
                 mutate(offset.plot = 0,
                        offset.plot = ifelse(model=="raw",-0.05,offset.plot)) %>%
-                       #offset.plot = ifelse(model=="mock2",0.05,offset.plot), 
-                       #offset.plot = ifelse(model=="pcr",0.2,offset.plot)) %>%
-               # mutate(comm.name = case_when(community=="North_Skew_1_39"~"North\n Skew 1",
-               #                              community=="North_Skew_2_39"~"North\n Skew 2",
-               #                              community=="Skew_Oceanic_1_39"~"Ocean\n Skew 1",
-               #                              community=="Skew_Oceanic_2_39"~"Ocean\n Skew 2",)) %>%
                 mutate(Calibration = case_when(model=="raw"~"None",
-                             model=="mock1"~"Mock B")) %>%
-                #             model=="mock2"~"Mock",
-                #             model=="pcr"~"Variable PCR",)) 
+                             model=="mock1"~"Mock")) %>%
                 as.data.frame()
 
 all.AD.sum$comm.idx = as.numeric(as.factor(all.AD.sum$community))
@@ -450,17 +345,17 @@ yBREAKS <- c(0,1,2,3,4,5)
 col.val <- pal_jco(palette = c("default"), alpha = 1)(10)[c(6,7)]
 
 p_AD <- ggplot(all.AD.sum) + # %>% 
-          geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.025,ymax=q.975,color=model),width=0) +
-          geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.25,ymax=q.75,color=model),size=2,width=0) +        
-          geom_point(aes(x=comm.idx + offset.plot,y=Mean,color=model ),shape =21,fill="white",size=2) +
+          geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.025,ymax=q.975,color=Calibration),width=0) +
+          geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.25,ymax=q.75,color=Calibration),size=2,width=0) +        
+          geom_point(aes(x=comm.idx + offset.plot,y=Mean,color=Calibration),shape =21,fill="white",size=2) +
           #scale_y_continuous(NULL,expand=c(0,NA),limits=c(0,NA),breaks=yBREAKS) +
           #scale_shape_manual(values=c(21,22,24)) +
-          #scale_fill_manual(values=col.val,"Community") +
-          #scale_color_manual(values=col.val,"Calibration") +
+          scale_fill_manual(values=col.val,"Community") +
+          scale_color_manual(values=col.val,"Calibration") +
           scale_x_continuous(NULL,breaks=xBREAKS$comm.idx,labels=xBREAKS$community,limits=c(NA,3.3)) +
           ylab("Aitchison distance") +
           theme_classic() +
-          theme(legend.position = "none",
+          theme(legend.position = c(0.4755,0.85),
                 plot.margin = margin(0,0,0,0.85,"lines"),
                 legend.key.size=unit(0.1,'lines'),
                 legend.text=element_text(size=7),
@@ -469,28 +364,18 @@ p_AD <- ggplot(all.AD.sum) + # %>%
 p_AD
 
 
-# yBREAKS <- c(0,1,2,3,4,5)
-# p_AD_ocean <- ggplot(all.AD.sum %>% filter(!model %in% c("pcr","mock1"),grepl("Ocean",community))) +
-#   geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.025,ymax=q.975,color=Calibration),width=0) +
-#   geom_errorbar(aes(x=comm.idx + offset.plot,ymin=q.25,ymax=q.75,color=Calibration),size=2,width=0) +        
-#   geom_point(aes(x=comm.idx + offset.plot,y=Mean,color=Calibration),shape=21,fill="white",size=2)+
-#   scale_y_continuous("Aitchison Distance",expand=c(0,0),limits=c(0,NA),breaks=yBREAKS) +
-#   #scale_shape_manual(values=c(21,22,24)) +
-#   scale_color_manual(values=col.val,"Calibration") +
-#   scale_x_continuous(NULL,breaks=xBREAKS$comm.idx,labels=xBREAKS$comm.name,limits=c(NA,4.3)) +
-#   theme_classic() +
-#   theme(legend.position = c(0.4755,0.85),
-#         plot.margin = margin(0,0,0,0.85,"lines"),
-#         legend.key.size=unit(0.1,'lines'),
-#         legend.text=element_text(size=7),
-#         legend.title=element_text(size=9))
-# 
-# p_AD_ocean
+#ggsave(p_AD, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S1_aitchison.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_AD, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S2_aitchison.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_AD, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S3_aitchison.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_AD, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S4_aitchison.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_AD, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S5_aitchison.pdf", width = 5, height = 5, units = "in")
 
 
 ###############################################################333    ###requires robCompositions again... 
 #### Pull out estimates of alpha, convert to CLR                        ### but using Hotelling package clr() function for now 
 ###############################################################333
+
+library(Hotelling)
 
 p_space_mock1 <- (exp(mock1$pars$alpha) / rowSums(exp(mock1$pars$alpha))) %>% as.data.frame()
 #clr_alpha_list_mock <- cenLR(p_space_mock1)
@@ -522,8 +407,10 @@ clr_alpha_sum <- clr_alpha_sum %>%
                       mutate(SP= ifelse(grepl("zRefSpecies_",species),
                                        substr(species,13,nchar(species)),
                                        as.character(species)))
-clr_alpha_sum$SP <- factor(clr_alpha_sum$SP,
-                                levels = clr_alpha_sum$SP)
+
+## use this to sort species by amplification eff
+#clr_alpha_sum$SP <- factor(clr_alpha_sum$SP,
+#                                levels = clr_alpha_sum$SP)
 
 # Add manual colors
 # clr_alpha_sum <- clr_alpha_sum %>% mutate(manual.col = "white",
@@ -540,7 +427,7 @@ clr_alpha_sum$SP <- factor(clr_alpha_sum$SP,
 
 
 
-p_clr_mock2 <- ggplot(clr_alpha_sum) +
+p_clr_mock2 <-  ggplot(clr_alpha_sum) +
     geom_errorbarh(aes(xmin=q.25,xmax=q.75,y=SP),size=2,height=0) +
     geom_errorbarh(aes(xmin=q.025,xmax=q.975,y=SP),size=0.8,height=0) +
     geom_point(aes(x=Mean,y=SP,fill=SP,),size=3,shape=21) +
@@ -550,12 +437,19 @@ p_clr_mock2 <- ggplot(clr_alpha_sum) +
     scale_y_discrete(NULL) +
     theme_bw() +
     theme(legend.position = "none",
-          axis.text.y = element_text(size=7))
+          axis.text.y = element_text(size=10))
 
 p_clr_mock2
 
-#clr_alpha_sum$SP2 <- clr_alpha_sum$SP
+#ggsave(p_clr_mock2, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S1_CLR.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_clr_mock2, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S2_CLR.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_clr_mock2, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S3_CLR.pdf", width = 5, height = 5, units = "in")
+#ggsave(p_clr_mock2, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S4_CLR.pdf", width = 5, height = 5, units = "in")
+ggsave(p_clr_mock2, filename = "/home/kimberly.ledger/gadid_metabarcoding/gadid_20220111/figures/gadid_S5_CLR.pdf", width = 5, height = 5, units = "in")
 
+
+
+## i stopped here ## 
 
 ##################
 #################3
