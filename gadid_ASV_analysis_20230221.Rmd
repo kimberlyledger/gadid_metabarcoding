@@ -1,0 +1,849 @@
+---
+title: "asv analysis"
+author: "Kimberly Ledger"
+date: "2023-02-27"
+output: github_document
+---
+
+analysis of gadid sequences from Feb 21 2023 MiSeq run 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+```{r, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+```
+
+read in gadid metadata 
+```{r}
+metadata <- read.csv("/genetics/edna/workdir/gadids/20230221/20230221_gadidmetadata.csv")
+
+#illumina output changed "_" to "-"
+metadata$SampleID <- gsub("_", "-", metadata$SampleID) 
+
+metadata$primer_set[which(metadata$primer_set == "ND1")] <- "S1"
+metadata$primer_set[which(metadata$primer_set == "ND5")] <- "S3"
+```
+
+read in all primer set's taxonomic identification tables and samples by asv tables
+```{r}
+taxon_S1 <- read.csv("/genetics/edna/workdir/gadids/20230221/S1_ND1/trimmed/filtered/outputs/asv_taxonomy_blastn.csv", row.names = 1) 
+taxon_S3 <- read.csv("/genetics/edna/workdir/gadids/20230221/S3_ND5/trimmed/filtered/outputs/asv_taxonomy_blastn.csv", row.names = 1) 
+
+asv_table_S1 <- read.csv("/genetics/edna/workdir/gadids/20230221/S1_ND1/trimmed/filtered/outputs/ASVtable.csv") %>%
+  rename(SampleID = X)
+asv_table_S3 <- read.csv("/genetics/edna/workdir/gadids/20230221/S3_ND5/trimmed/filtered/outputs/ASVtable.csv") %>%
+  rename(SampleID = X)
+```
+
+look at the number of ASVs for each species by primer set 
+```{r}
+asvs1 <- taxon_S1 %>%
+  group_by(taxon) %>%
+  summarise(S1_ASVs = n())
+asvs3 <- taxon_S3 %>%
+  group_by(taxon) %>%
+  summarise(S3_ASVs = n())
+
+
+merge(asvs1,asvs3)
+```
+
+quite a bit of variation but not sure how to interpret. 
+
+
+now, join taxon and asv tables for each primer set separately
+```{r}
+read_summary_S1 <- asv_table_S1 %>%
+  pivot_longer(cols = starts_with("ASV"), names_to = "ASV", values_to = "count") %>%
+  left_join(taxon_S1, by = "ASV") %>%
+  filter(count > 0) %>%
+  filter(taxon != "NA") %>%
+  group_by(SampleID, taxon) %>%
+  summarise(total_read_count = sum(count)) %>%
+  pivot_wider(names_from = "taxon", values_from = "total_read_count") %>%
+  replace(is.na(.), 0) %>%
+  mutate(primer_set = "S1")
+
+read_summary_S3 <- asv_table_S3 %>%
+  pivot_longer(cols = starts_with("ASV"), names_to = "ASV", values_to = "count") %>%
+  left_join(taxon_S3, by = "ASV") %>%
+  filter(count > 0) %>%
+  filter(taxon != "NA") %>%
+  group_by(SampleID, taxon) %>%
+  summarise(total_read_count = sum(count)) %>%
+  pivot_wider(names_from = "taxon", values_from = "total_read_count") %>%
+  replace(is.na(.), 0) %>%
+  mutate(primer_set = "S3")
+```
+
+join to metadata
+```{r}
+read_summary_all <- bind_rows(read_summary_S1, read_summary_S3)
+
+join <- metadata %>%
+  left_join(read_summary_all, by = c("SampleID", "primer_set"))
+
+join_long <- join %>%
+  pivot_longer(cols = 6:11, names_to = "taxon", values_to = "reads") %>%
+  mutate(reads = ifelse(is.na(reads), 0, reads))
+
+join_long$Project<- as.factor(join_long$Project)
+join_long$shortID<- as.factor(join_long$shortID)
+join_long$primer_set <- as.factor(join_long$primer_set)
+join_long$replicate <- as.factor(join_long$replicate)
+join_long$taxon <- as.factor(join_long$taxon)
+
+summary(join_long)
+```
+
+## take a look at the gadid egg samples
+```{r}
+eggs <- join_long %>%
+  filter(Project == "egg")
+```
+
+make some general plots for read counts
+```{r}
+eggs %>%
+  ggplot(aes(x= SampleID, y = reads, fill = taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "taxon",
+    title = "assigned reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+eggs_prop <- eggs %>%
+  group_by(SampleID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  select(!reads) %>%
+  select(!sum)
+```
+
+```{r even_readproportion}
+eggs_prop %>% 
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "Gadid Eggs") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+alright so it seems like all the eggs were walleye pollock.
+
+
+## now take a look at the gblock mock communities 
+
+```{r}
+MC <- join_long %>%
+  filter(Project == "MC")
+```
+
+make some general plots for read counts
+```{r}
+MC %>%
+  ggplot(aes(x= taxon, y = reads, fill = taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "taxon",
+    title = "assigned reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+MC_prop <- MC %>%
+  group_by(SampleID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  select(!reads) %>%
+  select(!sum)
+```
+
+```{r even_readproportion}
+MC_prop %>% 
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "mock community") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+let's read in metadata for the expected mock communities proportions to use for comparison
+```{r}
+mockc <- read.csv("/genetics/edna/workdir/gadids/20230221/mockcomm_metadata_20230221.csv") %>%
+  rename(prop = Perc_Community) %>%
+  rename(taxon = Species) %>%
+  rename(shortID = Community) %>%
+  mutate(Project = "MC") %>%
+  mutate(SampleID = "expected") %>%
+  mutate(primer_set = "expected") %>%
+  mutate(replicate = 1)
+```
+
+
+```{r}
+MC_prop <- rbind(mockc, MC_prop)
+```
+
+
+## now let's check out data! 
+
+any sequences in PCR blanks? 
+```{r}
+MC %>% 
+  filter(shortID == "NC") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "PCR blanks") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+cool. no reads in negative controls. 
+
+## now let's take a look at reads from the mock communities 
+
+### even 
+* each species should be ~16.6% 
+```{r even_readnumber}
+MC %>% 
+  filter(shortID == "even") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "Even - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r even_readproportion}
+MC_prop %>% 
+  filter(shortID == "even") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "Even - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+### north1
+* A.glacilis (polar cod) = 25%
+* B. saida (arctic cod) = 50%
+* E. gracilis (saffron cod) = 5%
+* G. chalcogrammus (Walleye pollock) = 10%
+* G. macrocephalus (Pacific cod) = 5%
+* M. proximus (tomcod) = 5%
+
+```{r north1_readnumber}
+MC %>% 
+  filter(shortID == "north1") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "North1 - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r north1_readproportion}
+MC_prop %>% 
+  filter(shortID == "north1") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "North1 - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+### north2
+* A.glacilis (polar cod) = 10%
+* B. saida (arctic cod) = 50%
+* E. gracilis (saffron cod) = 5%
+* G. chalcogrammus (Walleye pollock) = 25%
+* G. macrocephalus (Pacific cod) = 5%
+* M. proximus (tomcod) = 5%
+
+```{r north2_readnumber}
+MC %>% 
+  filter(shortID == "north2") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "North2 - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r north2_readproportion}
+MC_prop %>% 
+  filter(shortID == "north2") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "North2 - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+### south1 
+* A.glacilis (polar cod) = 5%
+* B. saida (arctic cod) = 10% 
+* E. gracilis (saffron cod) = 5% 
+* G. chalcogrammus (Walleye pollock) = 50%
+* G. macrocephalus (Pacific cod) = 25%
+* M. proximus (tomcod) = 5%
+
+```{r south1_readnumber}
+MC %>% 
+  filter(shortID == "south1") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "South1 - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r south1_readproportion}
+MC_prop %>% 
+  filter(shortID == "south1") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "South1 - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+
+### south2
+* A.glacilis (polar cod) = 5% 
+* B. saida (arctic cod) = 5%
+* E. gracilis (saffron cod) = 25% 
+* G. chalcogrammus (Walleye pollock) = 50%
+* G. macrocephalus (Pacific cod) = 10%
+* M. proximus (tomcod) = 5% 
+
+```{r south2_readnumber}
+MC %>% 
+  filter(shortID == "south2") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "South2 - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r south2_readproportion}
+MC_prop %>% 
+  filter(shortID == "south2") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "South2 - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+### middle
+* A.glacilis (polar cod) = 5%
+* B. saida (arctic cod) = 10% 
+* E. gracilis (saffron cod) = 5% 
+* G. chalcogrammus (Walleye pollock) = 25%
+* G. macrocephalus (Pacific cod) = 50% 
+* M. proximus (tomcod) = 5% 
+
+```{r middle_readnumber}
+MC %>% 
+  filter(shortID == "middle") %>%
+  ggplot(aes(x=SampleID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "Middle - number of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r middle_readproportion}
+MC_prop %>% 
+  filter(shortID == "middle") %>%
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "Middle - proportion of reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+if there are < around 1000 reads for a sample, the mock community proportions noticeably deviate from what is expected. 
+
+
+
+## now i want to plot expected proportion by observed proportion 
+
+i'm re-reading in the mock community table here because i made changes to it above... should eventually come back here and streamline
+```{r}
+mockcomm <- read.csv("/genetics/edna/workdir/gadids/20230221/mockcomm_metadata_20230221.csv") %>%
+  rename(Prop_Community = Perc_Community)
+```
+
+
+```{r}
+MC_table <- MC %>%
+  group_by(SampleID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  rename(Community = shortID) %>%
+  rename(Species = taxon) %>%
+  left_join(mockcomm, by= c("Community", "Species")) %>%
+  filter(Community != "NC")    ### come back and include these later? 
+```
+
+
+```{r expected_vs_observed}
+MC_table %>% 
+  ggplot(aes(x=Prop_Community, y=prop, color=Species)) +
+  geom_point(aes(shape = Community)) + 
+  facet_wrap(~primer_set, scales = 'free') +
+  geom_smooth(method = "lm", alpha = 0.1, aes(fill = Species)) +
+  theme_bw() +
+  ylim(0, 0.75) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dotted') +
+  labs(
+    y = "observed proportion",
+    x = "true proportion",
+    title = "comparison of known mock community with observed raw read proportion") 
+```
+
+greater sequencing depth would likely help with this. 
+
+
+## plot true proportion by fold error (as in Shelton et al Appendix S1 Figure S2)
+
+```{r folderror}
+# MC_table %>%
+#   mutate(fold_error = log(Prop_Community/prop)) %>%
+#   ggplot(aes(x=Prop_Community, y=fold_error, color=Species)) +
+#   geom_point(aes(shape = Community)) + 
+#   geom_hline(yintercept = 0, linetype = 'dotted') +
+#   facet_wrap(~primer_set, scales = 'free') +
+#   theme_bw() +
+#   ylim(-1.5,4) +
+#   labs(
+#     y = "Fold Error (log[true_prop/obs_prop])",
+#     x = "true proportion",
+#     title = "comparison of known mock community with error estimates") 
+```
+
+```{r}
+# prop_table %>%
+#   mutate(fold_error = log(Prop_Community/prop)) %>%
+#   mutate(Prop_Community = as.factor(Prop_Community)) %>%
+#   ggplot(aes(x=Prop_Community, y=fold_error)) +
+#   geom_boxplot() + 
+#   geom_hline(yintercept = 0, linetype = 'dotted') +
+#   facet_wrap(~primer_set, scales = 'free') +
+#   theme_bw() +
+#   ylim(-1.5,4) +
+#   labs(
+#     y = "Fold Error (log[true_prop/obs_prop])",
+#     x = "true proportion",
+#     title = "comparison of known mock community with error estimates") 
+```
+
+
+
+## use the slope of the true vs observed proportion line as amplifiction efficiency estimate
+
+```{r}
+library(broom)
+amp_est_95 <- MC_table %>%
+  group_by(primer_set, Species) %>%
+  do(tidy(lm(prop ~ Prop_Community, .), conf.int =TRUE, conf.level = 0.95)) %>%
+  filter(term == "Prop_Community") %>%
+  select(Species, estimate, conf.low, conf.high, p.value) %>%
+  rename(u95 = conf.high) %>%
+  rename(l95 = conf.low) 
+#amp_est_95
+
+amp_est_50 <- MC_table %>%
+  group_by(primer_set, Species) %>%
+  do(tidy(lm(prop ~ Prop_Community, .), conf.int =TRUE, conf.level = 0.5)) %>%
+  filter(term == "Prop_Community") %>%
+  select(Species, estimate, conf.low, conf.high, p.value) %>%
+  rename(u50 = conf.high) %>%
+  rename(l50 = conf.low) 
+#amp_est_50
+
+amp_est <- amp_est_95 %>%
+  left_join(amp_est_50)
+
+amp_est
+```
+
+plot it 
+```{r amplification_est}
+mock_amp_eff <- amp_est %>%
+  ggplot() +
+  geom_errorbarh(aes(xmin=l50,xmax=u50,y=Species),size=2,height=0) +
+  geom_errorbarh(aes(xmin=l95,xmax=u95,y=Species),size=0.8,height=0) +
+  geom_point(aes(x=estimate,y=Species,fill=Species,),size=3,shape=21) +
+  geom_vline(xintercept=1,linetype="dashed") +
+  facet_grid(rows = vars(primer_set)) +
+  #facet_grid(~primer_set, vars(rows = 5, cols = 1)) +
+  #scale_fill_manual(values=clr_alpha_sum$manual.col %>% as.character()) +
+  scale_x_continuous("Amplification Efficiency (i.e. slope)") +
+  scale_y_discrete(NULL) +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.y = element_text(size=10))
+
+mock_amp_eff
+```
+
+
+## take a look at the NBS samples 
+
+```{r}
+NBS <- join_long %>%
+  filter(Project == "NBS")
+```
+
+make some general plots for read counts
+```{r}
+NBS %>%
+  ggplot(aes(x= SampleID, y = reads, fill = taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "taxon",
+    title = "assigned reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+```{r}
+NBS_prop <- NBS %>%
+  group_by(SampleID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  select(!reads) %>%
+  select(!sum)
+```
+
+```{r even_readproportion}
+NBS_prop %>% 
+  ggplot(aes(x=SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~primer_set, scales = 'free') +
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "NBS") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+okay, the odd thing here is that i mainly/only found walleye pollock in the NBS samples... and this is according to both primer sets... 
+
+### now let's compare to the NBS data analysis completed previously with the MiFish primers and insect taxonomic analysis
+
+```{r}
+nbs_meta <- read.csv("/home/kimberly.ledger/NBS_eDNA/NBS_eDNA/NBS_2021_metadata_kjl.csv") %>%
+  select(!X) %>%
+  arrange(Sample_ID)
+```
+
+
+keeping just the Gadiformes reads
+```{r}
+taxon_12s <- read.csv("/home/kimberly.ledger/NBS_eDNA/NBS_eDNA/taxon_table.csv", row.names = 1) %>%
+  filter(order == "Gadiformes")
+```
+
+reformat
+```{r}
+mytax <- taxon_12s$taxon
+
+nbs.df <- taxon_12s %>%
+  select(!taxID:species)
+
+row.names(nbs.df) <- mytax
+
+nbs.df.trans <- data.frame(t(nbs.df))
+
+mysamples <- row.names(nbs.df.trans)
+
+nbs.df.trans$Sample_ID <- mysamples
+
+df <- nbs_meta %>%
+  left_join(nbs.df.trans, by = "Sample_ID")
+```
+
+pivot table
+```{r}
+df_long <- df %>%
+  pivot_longer(Gadidae:Gadoidei, names_to = "taxon", values_to = "reads")
+```
+
+keep only the samples that i also used the gadid specific primers with
+```{r}
+ids <- NBS %>%
+  select(shortID) %>%
+  unique()
+```
+
+
+remove positive and negative control from list 
+```{r}
+ids <- ids[-c(15:16),]
+```
+
+```{r}
+df_reduced <- df_long %>%
+  filter(Extraction_ID %in% ids$shortID)
+```
+
+plot
+```{r}
+df_reduced %>%
+  ggplot(aes(x= Sample_ID, y = reads, fill = taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "taxon",
+    title = "assigned reads - 12S") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+combine 12S NBS and gadid specific NBS sequences for comparison
+```{r}
+NBS_ND <- NBS %>%
+  select(!SampleID) %>%
+  select(!Project) %>%
+  select(!replicate)
+
+NBS_12S <- df_reduced %>%
+  select(Sample_ID, taxon, reads)
+```
+
+
+
+
+NBS %>%
+  ggplot(aes(x= SampleID, y = reads, fill = taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  facet_grid(~primer_set, scales = 'free') + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "taxon",
+    title = "assigned reads") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+
