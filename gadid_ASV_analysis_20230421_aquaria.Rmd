@@ -1,0 +1,580 @@
+---
+title: "asv analysis of gadid aquaria samples"
+author: "Kimberly Ledger"
+date: "2023-04-25"
+output: github_document
+---
+
+analysis of gadid sequences from April 21 2023 sequencing run  
+samples are from the gadid aquaria mixtures   
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+```{r, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+```
+
+read in gadid metadata - includes sampleID, extractionID, alternativeID, sample type, and prep replicate (A = no normalization; B = sequalprep normalization; C = bead normalization)
+```{r}
+metadata <- read.csv("/genetics/edna/workdir/gadids/20230421_aquaria/20230421_gadid_aquaria_metadata.csv")
+
+#illumina output changed "_" to "-"
+metadata$Sample_ID <- gsub("_", "-", metadata$Sample_ID) 
+```
+
+
+read in taxonomic identification tables and samples by asv tables
+```{r}
+taxon_S1 <- read.csv("/genetics/edna/workdir/gadids/20230421_aquaria/trimmed/filtered/outputs/asv_taxonomy_blastn.csv", row.names = 1) 
+
+asv_table_S1 <- read.csv("/genetics/edna/workdir/gadids/20230421_aquaria/trimmed/filtered/outputs/ASVtable.csv") %>%
+  rename(Sample_ID = X)
+```
+
+
+how many initial ASV's are there for each species?
+```{r}
+taxon_S1 %>%
+  group_by(taxon) %>%
+  summarise(ASVs = n())
+```
+
+there should not be any A. glacialis or M. proximus in this data... maybe a lab contaimination or ASV taxonomic assignment issue? come back to this later. 
+
+now, join taxon and asv tables
+```{r}
+read_summary <- asv_table_S1 %>%
+  pivot_longer(cols = starts_with("ASV"), names_to = "ASV", values_to = "count") %>%
+  left_join(taxon_S1, by = "ASV") %>%
+  filter(count > 0) %>%
+  filter(taxon != "NA") %>%
+  group_by(Sample_ID, taxon) %>%
+  summarise(total_read_count = sum(count)) %>%
+  pivot_wider(names_from = "taxon", values_from = "total_read_count") %>%
+  replace(is.na(.), 0)
+```
+
+now i'm going to go back and take a closer look at individual ASVs 
+```{r}
+asv_w_id <- asv_table_S1[-433,] %>% #removes "Undetermined" reads
+  summarise(across(ASV1:ASV193, sum)) %>%
+  pivot_longer(cols=starts_with("ASV"), names_to = "ASV", values_to = "reads") %>%
+  left_join(taxon_S1, by = "ASV")
+```
+
+plot a histogram 
+```{r echo=FALSE}
+ggplot(asv_w_id, aes(x=reads, fill=taxon)) +
+  geom_histogram()
+```
+
+okay, a few ASVs with MANY reads, most with few... 
+
+filter the top few ASVs to get a better visualization 
+```{r echo=FALSE}
+asv_w_id %>%
+  filter(reads < 10000) %>%
+  ggplot(aes(x=reads, fill=taxon)) +
+  geom_histogram()
+```
+
+and again 
+```{r echo=FALSE}
+asv_w_id %>%
+  filter(reads < 1000) %>%
+  ggplot(aes(x=reads, fill=taxon)) +
+  geom_histogram()
+```
+
+i will start by removing all ASVs with less than 250 reads. 
+```{r}
+asv_filtered <- asv_w_id %>%
+  filter(reads > 250)
+```
+
+
+first let's look at the proportion of reads for a species assigning to individual ASV's 
+```{r echo=FALSE}
+asv_filtered %>%
+  group_by(taxon) %>%
+  filter(taxon != "NA") %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  ggplot(aes(x=taxon, y=prop, fill=ASV)) +
+  geom_bar(stat = "identity") + 
+    theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "taxon",
+    title = "ASV proportions") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+good, A. glacilis and M. proximus ASVs are now gone. 
+
+next, i'll manually go through some of the ASVs to see if they should be there or not... 
+
+asv summary table 
+```{r}
+asv_filtered %>%
+  group_by(taxon) %>%
+  filter(taxon != "NA") %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  arrange(taxon)
+```
+**E. gracilis**
+ASV7 = 99% E. gracilis reads
+okay so i know the most about E. gracilis because it should only be in my positive controls. all PCs have >3000 reads of ASV7 and all contaminated samples have <100 reads. the only other ASV assigned to E. gracilis is ASV35 and those samples shouldn't have an E. gracilis (unless this is some sort of test...) for reference ASV35 = 99.1% match in blastn.
+
+**B. saida**
+ASV3 = 94.7% B. saida reads (with ASV12 = 2.3%, ASV15 = 1.9%) 
+for B. saida, most all ASV3 (100% blastn match). ASV12 is 99.5% blastn match. samples with ASV12 have between 920-145 reads. this may be legit... 
+ASV12 is present in replicate samples a few times so i'm leaning towards keeping ASV12 
+ASV15 is 99.5% blastn match and has 6000 to hundreds of reads in a few samples.. probably keep 
+
+**G. chalcogrammus**
+ASV1 = 86% G. chalcogrammus (with ASV6 = 5.6%; ASV8 = 4.4%, ASV10 = 2.2%)
+keep ASV1.
+ASV6 has thousands to >300 reads in each sample. keep. 
+ASV8 has touusands/hundreds for many samples. keep.
+ASV10 has thousands to >450 reads for samples. keep.
+ASV21 has 378-69 reads per sample.. there also ASV1's in same samples...
+ASV23 has 288-146 read per sample..  there also ASV1's in same samples...
+ASV38 has 200-76 reads per sample.. there also ASV1's in same samples...
+ASV39 okay
+ASV46 okay
+... maybe bump up read threshold to 500 per ASV??? 
+
+**G. macrocephalus**
+ASV2 = 70% G. macrocephalus (with ASV4 = 11%; ASV5 = 10%; ASV9 = 3.5%; ASV11 = 1.5%)
+keep ASV2, ASV4, ASV5, ASV9, ASV11, ... etc... keep all. 
+
+
+based on my initally poking around i will now filter out all ASV's with <500 reads 
+```{r}
+asv_filtered2 <- asv_filtered %>%
+  filter(reads > 499)
+```
+
+
+how many now many ASV's are there for each species?
+```{r}
+asv_filtered2 %>%
+  group_by(taxon) %>%
+  summarise(ASVs = n())
+```
+
+now, join taxon and asv tables
+```{r}
+read_summary <- asv_table_S1 %>%
+  pivot_longer(cols = starts_with("ASV"), names_to = "ASV", values_to = "count") %>%
+  left_join(asv_filtered2, by = "ASV") %>%
+  filter(count > 0) %>%
+  filter(taxon != "NA") %>%
+  group_by(Sample_ID, taxon) %>%
+  summarise(total_read_count = sum(count)) %>%
+  pivot_wider(names_from = "taxon", values_from = "total_read_count") %>%
+  replace(is.na(.), 0)
+```
+
+join to metadata  - UPDATE COLUMN NUMBERS BELOW depending on input read_summary data
+```{r}
+join <- metadata %>%
+  left_join(read_summary, by = c("Sample_ID"))
+
+join_long <- join %>%
+  pivot_longer(cols = 9:12, names_to = "taxon", values_to = "reads") %>%
+  mutate(reads = ifelse(is.na(reads), 0, reads))
+
+join_long$extraction_ID<- as.factor(join_long$extraction_ID)
+join_long$alternative_ID <- as.factor(join_long$alternative_ID)
+join_long$replicate <- as.factor(join_long$replicate)
+join_long$taxon <- as.factor(join_long$taxon)
+join_long$sample_type <- as.factor(join_long$sample_type)
+
+summary(join_long)
+```
+
+# now let's check out data! 
+
+## take a look at the positive controls 
+
+```{r echo=FALSE}
+join_long %>%
+  filter(sample_type == "positive") %>% 
+  group_by(Sample_ID) %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+    theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "positive controls") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+okay, in general this is pretty good. but will need to look into why a few reads of species other than E. gracilis are in my PC.  
+
+```{r echo=FALSE}
+join_long %>%
+  filter(sample_type == "positive") %>% 
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+    theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "positive controls") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+the proportion of reads for the species that shouldn't be there are quite low. 
+
+## any sequences in PCR blanks? 
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "PCR_blank") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "PCR blanks") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+unfortunately there are some reads in the PCR negative controls... but the read number are all fairly low (i.e. less than 400)
+
+## any sequences in extraction blanks? 
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "extraction_blank") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "extraction blanks") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+there are also some reads in the extraction controls. but again read number is fairly low (less that 500). also a pretty clear trend of read number across sample prep replicates (A>B>C).
+
+
+## now let's take a look at reads from the aquaria samples 
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #(~pcod_set, scales = 'free_x') +
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "aquaria - number of reads") + 
+  theme(
+    axis.text.x=element_blank(), #remove x axis labels
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank(),
+  )
+```
+
+looks pretty good. but i know some of these should be "field blanks" and have no reads. 
+
+
+based on the results of the negative controls. i will set a read count filter for samples. any sample with <600 reads total, set to 0 
+
+```{r}
+read_summary$total <- rowSums(read_summary[,2:5])
+```
+
+```{r}
+read_summary_filtered <- read_summary %>%
+  filter(total > 599) %>%
+  dplyr::select(!total)
+```
+
+
+```{r}
+join <- metadata %>%
+  left_join(read_summary_filtered, by = c("Sample_ID"))
+
+join_long <- join %>%
+  pivot_longer(cols = 9:12, names_to = "taxon", values_to = "reads") %>%
+  mutate(reads = ifelse(is.na(reads), 0, reads))
+
+join_long$extraction_ID<- as.factor(join_long$extraction_ID)
+join_long$alternative_ID <- as.factor(join_long$alternative_ID)
+join_long$replicate <- as.factor(join_long$replicate)
+join_long$taxon <- as.factor(join_long$taxon)
+join_long$sample_type <- as.factor(join_long$sample_type)
+
+summary(join_long)
+```
+
+re-plot with the filtered dataset 
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "aquaria - number of reads") + 
+  theme(
+    axis.text.x=element_blank(), #remove x axis labels
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank(),
+  )
+```
+
+the only thing that concerns me is the E. glacilis reads in some of these samples... 
+the read counts for those go up to 206.  
+maybe there also needs to be a filter for reads of individual species within a sample??? 
+i won't do that for now but something to consider later on perhaps. 
+
+
+## now i am working with an ASV read threshold of 500 reads and sample read threshold of 600 reads
+
+export to use in other scripts
+```{r}
+write.csv(join_long, "/genetics/edna/workdir/gadids/20230421_aquaria/20230421_filtered_readsummary.csv")
+```
+
+
+
+okay, it's really too hard to see what is going on in the plots above. i'll try sub-setting to get a better look. 
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "A") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "aquaria - number of reads - no normalization") + 
+  theme(
+    axis.text.x=element_blank(), #remove x axis labels
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank(),
+  )
+```
+
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "A") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #facet_wrap(~pcod_set, scales = 'free_x') + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - no normalization") + 
+  theme(
+    axis.text.x = element_blank(),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "B") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #(~pcod_set, scales = 'free_x') +
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "aquaria - number of reads - sequalprep normalization") + 
+  theme(
+    axis.text.x=element_blank(), #remove x axis labels
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank(),
+  )
+```
+
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "B") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #facet_wrap(~pcod_set, scales = 'free_x') + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - sequalprep normalization") + 
+  theme(
+    axis.text.x = element_blank(),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "C") %>%
+  ggplot(aes(x=Sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #(~pcod_set, scales = 'free_x') +
+  scale_y_sqrt() +
+  theme_bw() +
+  labs(
+    y = "sequencing reads",
+    x = "sample",
+    title = "aquaria - number of reads - bead normalization") + 
+  theme(
+    axis.text.x=element_blank(), #remove x axis labels
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank(),
+  )
+```
+
+```{r echo=FALSE}
+join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "C") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  #facet_wrap(~pcod_set, scales = 'free_x') + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - bead normalization") + 
+  theme(
+    axis.text.x = element_blank(),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+just eyeballing it, the read count replicates A, B, and C looks fairly similar but with slightly A>B>C reads counts. the read proportions also look fairly similar across replicates. will need to get more quantitative about this next. 
+
+
+
+visual of extraction and prep replicates for just a few of the tank samples 
+```{r echo=FALSE}
+test <- join_long %>%
+  arrange(alternative_ID) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum)
+  
+test[1:120,] %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_grid(~alternative_ID, scales = 'free_x') + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - subset of samples") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+except for 118, extraction and prep replicates look very similar for read proportions 
+- read counts for 118 are 4040 and 1846. this is lower than most. 
+- maybe a higher read count threshold per sample is needed? 
+
+it would be nice to calculate average and 95%CI of read count for samples with "good" assignments versus samples with "bad" assignments to help establish this threshold. i will need more tank metadata in order to do this... but for now.
+
+considering that i've already done some filter for ASVs and read count, 
+```{r}
+join_long %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  group_by(sample_type) %>%
+  summarise(mean = mean(sum),
+            median = median(sum),
+            std_dev = sd(sum))
+```
