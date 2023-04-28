@@ -1,0 +1,178 @@
+---
+title: "trying compositional data analyses"
+author: "Kimberly Ledger"
+date: "2023-04-26"
+output: github_document
+---
+
+running some stats on the gadid aquaria read data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+load libraries
+```{r}
+library(tidyverse)
+library(zCompositions) #for cmultRepl() 
+library(compositions) #for clr()
+library(vegan) #for vegdist()
+```
+
+
+load data 
+```{r}
+aquaria_dat <- read.csv("/genetics/edna/workdir/gadids/20230421_aquaria/20230421_filtered_readsummary.csv") %>%
+  dplyr::select(!X) %>%
+  dplyr::select(!extraction_plate) %>%
+  dplyr::select(!extraction_well) %>%
+  rename("prep" = "replicate")  ##rename replicate to not confuse as true replicates, these are the same sample but used different library prep methods
+```
+
+
+pivot data and remove PC as they don't have ext_ID or alt_ID and mess with code later on... should probably edit metadata later on so i can include these
+```{r}
+aquaria_wide <- aquaria_dat %>%
+  pivot_wider(names_from = "taxon", values_from = "reads") %>%
+  filter(alternative_ID != "NA")
+```
+
+
+we have to deal with the fact there are zeros. will use cmultRepl() from zCompositions which is a method of imputing zeros for compositional datasets. this assumes these are "count zeros". defined as "where the feature exists in the sample, but counting is not exhaustive enough to see it at least once". not sure that applies to my data but just going with it for now.
+```{r}
+#find zeros 
+zPatterns(aquaria_wide[,7:10], label = 0)
+
+#i think i have to remove rows with all zeros... this is just NC so it's okay for now. but will need to think more about this when using field data 
+aquaria_wide$sum <- rowSums(aquaria_wide[,7:10])
+
+aquaria_wide_no0_rows <- aquaria_wide %>%
+  filter(sum > 0) %>%
+  dplyr::select(!sum)
+
+cdata <- aquaria_wide_no0_rows[,7:10]
+cdata_no0 <- cmultRepl(cdata, output = "p-counts")  ## maybe i should remove E.gracilis from this because it is the PC? 
+head(cdata_no0)
+```
+
+save metadata
+```{r}
+aquaria_meta <- aquaria_wide_no0_rows[,1:6]
+```
+
+
+perform centered log-tranformation 
+```{r}
+aquaria_clr <- clr(cdata_no0)  #there is also a function codaSeq.clr() to potentially try out later on... 
+head(aquaria_clr)
+```
+
+perform PERMANOVAs  
+
+i **think** the model set up is correct but it would be good to get a second opinion  
+there was an error when using clr transformed data... maybe the clr transformation is done in the aitchison method? 
+
+does prep method effect composition (in general)?  
+```{r}
+adonis2(cdata_no0 ~ prep, data = aquaria_meta, permutations = 999, method = "aitchison")
+```
+okay, so this tells me the prep method does not effect composition... but should see if i can control for extraction_ID. 
+
+there is no specification of random effects in adonis2() but one can control for extraction_ID/alt_ID by using the "strata =" term. 
+
+do prep methods differ while controlling for extractionID and altID? 
+```{r}
+adonis2(cdata_no0 ~ prep, data = aquaria_meta, strat = aquaria_meta$extraction_ID, permutations = 999, method = "aitchison")
+
+adonis2(cdata_no0 ~ prep, data = aquaria_meta, strat = aquaria_meta$alternative_ID, permutations = 999, method = "aitchison")
+```
+
+alright so this is still not significant so prep method does not affect composition. 
+
+
+does the alt_ID or extraction_ID affect composition? 
+```{r}
+adonis2(cdata_no0 ~ alternative_ID, data = aquaria_meta, permutations = 999, method = "aitchison")
+
+adonis2(cdata_no0 ~ extraction_ID, data = aquaria_meta, permutations = 999, method = "aitchison")
+```
+
+both alt_id and ext_id explain lot of the variability in composition. this makes sense. samples are different. and i think the high R2 values indicate that replicates of alt_id and ext_id are pretty similar. 
+
+
+do extraction IDs vary in their composition across multiple alt_IDs (i.e. samples)?   
+this notation means extraction_ID is nested within alternative_ID - this takes a long time to run...
+```{r}
+adonis2(cdata_no0 ~ alternative_ID / extraction_ID, data = aquaria_meta, strata = aquaria_meta$alternative_ID, by = "terms", method = "aitchison")
+```
+
+okay, i think this means that within an alt_ID (aka. sample) the different extractions do not vary. 
+
+not sure if it is worth trying other combinations of variables in models (?)
+
+
+probably have to test for dispersion since that is an assumption of permanovas
+```{r}
+aquaria_dist <- vegdist(cdata_no0, method = "aitchison") 
+
+disp_prep <- betadisper(aquaria_dist, aquaria_meta$prep)
+
+disp_ext <- betadisper(aquaria_dist, aquaria_meta$extraction_ID)
+
+disp_alt <- betadisper(aquaria_dist, aquaria_meta$alternative_ID)
+```
+
+```{r}
+set.seed(4)
+permutest(disp_prep)
+permutest(disp_ext)
+permutest(disp_alt)
+```
+
+okay, so there significant dispersion in the alternative_id. will have to deal with that if moving forward with the test
+
+
+Next: try anosim 
+
+does prep method effect composition (in general)?  
+```{r}
+#again i can't use non-positive data so not including clr transformation
+ano_prep <- with(aquaria_meta, anosim(aquaria_dist, prep, permutations = 999))
+summary(ano_prep)
+plot(ano_prep)
+```
+
+this result also suggests prep method does not effect composition. 
+
+do prep methods differ while controlling for extractionID? 
+```{r}
+aquaria_dist <- vegdist(cdata_no0, method = "aitchison")  #again i can't use non-positive data so not including clr transformation
+ano_prep_ext <- with(aquaria_meta, anosim(aquaria_dist, prep, strat = aquaria_meta$extraction_ID, permutations = 999))
+summary(ano_prep_ext)
+plot(ano_prep_ext)
+```
+
+still not significant, so prep method does not affect composition 
+
+
+
+```{r}
+ano_alt <- with(aquaria_meta, anosim(aquaria_dist, alternative_ID, permutations = 999)) 
+summary(ano_alt)
+plot(ano_alt)
+```
+
+```{r}
+ano_ext <- with(aquaria_meta, anosim(aquaria_dist, extraction_ID, permutations = 999))
+summary(ano_ext)
+plot(ano_ext)
+```
+
+
+conclusions: 
+- can treat prep methods as replicates 
+- can treat extraction replicates and replicates 
+
+
+
