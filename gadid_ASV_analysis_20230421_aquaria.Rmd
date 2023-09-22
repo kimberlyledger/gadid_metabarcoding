@@ -387,7 +387,7 @@ i won't do that for now but something to consider later on perhaps.
 
 export to use in other scripts
 ```{r}
-write.csv(join_long, "/genetics/edna/workdir/gadids/20230421_aquaria/20230421_filtered_readsummary.csv")
+#write.csv(join_long, "/genetics/edna/workdir/gadids/20230421_aquaria/20230421_filtered_readsummary.csv")
 ```
 
 
@@ -413,6 +413,26 @@ join_long %>%
     legend.title = element_blank(),
   )
 ```
+
+export a table with read number from the no normalization replicate
+```{r}
+temp <- join_long %>% 
+  filter(sample_type == "sample") %>%
+  filter(replicate == "A") %>%
+  group_by(alternative_ID, taxon) %>%
+  summarize(mean_reads = mean(reads))
+```
+
+```{r}
+temp_gach <- temp %>%
+  filter(taxon == "Gadus chalcogrammus") %>%
+  arrange(desc(mean_reads))
+temp_gama <- temp %>%
+  filter(taxon == "Gadus macrocephalus") %>%
+  arrange(desc(mean_reads))
+```
+
+
 
 ```{r echo=FALSE}
 join_long %>% 
@@ -578,3 +598,31 @@ join_long %>%
             median = median(sum),
             std_dev = sd(sum))
 ```
+
+```{r}
+temp <- join_long %>% 
+  filter(sample_type == "sample") %>%
+  #filter(replicate == "C") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(reads)) %>%
+  mutate(prop = reads/sum) %>%
+  group_by(alternative_ID, taxon) %>%
+  summarise(mean_prop = mean(prop))
+```
+
+
+
+```{r}
+gama <- temp %>%
+  filter(taxon == "Gadus macrocephalus") %>%
+  filter(mean_prop < 0.25) %>%
+  filter(mean_prop > 0.10)
+```
+
+
+```{r}
+join_long %>%
+  filter(alternative_ID == "213")
+```
+
+

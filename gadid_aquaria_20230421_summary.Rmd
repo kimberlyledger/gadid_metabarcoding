@@ -15,6 +15,8 @@ load libraries
 ```{r}
 library(tidyverse)
 library(ggplot2)
+library(forcats)
+library(cowplot)
 ```
 
 
@@ -95,12 +97,132 @@ sample_avg <- aquaria_dat %>%
             sd_prop = sd(prop))
 ```
 
+to change the order of the stacked barplot, i need to redo the format
 ```{r}
-sample_avg %>%
-  arrange(taxon, avg_prop) %>%
+sample_avg_wide <- sample_avg %>%
+  dplyr::select(!sd_prop) %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(desc(`Gadus macrocephalus`))
+
+my_order <- as.character(sample_avg_wide$alternative_ID)
+
+library(forcats)
+
+sample_avg_wide_test <- sample_avg_wide %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+sample_avg_long <- sample_avg_wide_test %>%
+  pivot_longer(cols = c(2:5), names_to = "taxon", values_to = "avg_prop")
+
+sample_avg_long %>%
   ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
-  geom_bar(stat = "identity") + 
+  geom_bar(stat = "identity", position = "stack") + 
   theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - pcod descending") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+sample_avg_wide <- sample_avg %>%
+  dplyr::select(!sd_prop) %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(`Gadus chalcogrammus`)
+
+my_order <- as.character(sample_avg_wide$alternative_ID)
+
+library(forcats)
+
+sample_avg_wide_test <- sample_avg_wide %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+sample_avg_long <- sample_avg_wide_test %>%
+  pivot_longer(cols = c(2:5), names_to = "taxon", values_to = "avg_prop")
+
+sample_avg_long %>%
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - pollock ascending") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+sample_avg_wide <- sample_avg %>%
+  dplyr::select(!sd_prop) %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(`Boreogadus saida`)
+
+my_order <- as.character(sample_avg_wide$alternative_ID)
+
+library(forcats)
+
+sample_avg_wide_test <- sample_avg_wide %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+sample_avg_long <- sample_avg_wide_test %>%
+  pivot_longer(cols = c(2:5), names_to = "taxon", values_to = "avg_prop")
+
+sample_avg_long %>%
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample",
+    title = "aquaria - proportion of reads - arctic cod ascending") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+```
+
+modify plot to group/facet(?) samples by the dominate species 
+```{r}
+sample_avg_wide <- sample_avg %>%
+  dplyr::select(!sd_prop) %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") 
+
+samp_id <- sample_avg_wide$alternative_ID
+
+sample_avg_test <- sample_avg_wide[,-1] %>%
+  mutate(group_max = names(.)[max.col(.)]) %>%
+  mutate(alternative_ID = samp_id)
+
+sample_avg_group <- sample_avg_test %>% 
+    pivot_longer(cols = c(1:4), names_to = "taxon", values_to = "avg_prop")
+```
+
+
+```{r}
+sample_avg_group %>%
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  facet_grid(~group_max, scales = 'free_x') +
   labs(
     y = "proportion of sequencing reads",
     x = "sample",
@@ -114,8 +236,122 @@ sample_avg %>%
   )
 ```
 
-think of a way to include errors in proportions into a visual... 
-is there a way to arrange the order of these stacked barplot by prop of the taxa?  
+okay, i don't know how i would arrange the contents of each facet by different species, so i'll try dividing into three different plots and then combining... 
+
+```{r}
+bs1 <- sample_avg_group %>%
+  filter(group_max == "Boreogadus saida") %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(desc(`Boreogadus saida`))
+
+my_order <- as.character(bs1$alternative_ID)
+
+bs2 <- bs1 %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+bs3 <- bs2 %>%
+  pivot_longer(cols = c(3:6), names_to = "taxon", values_to = "avg_prop") 
+  
+bs_plot <- bs3 %>%  
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample")+ #,
+    #title = "arctic cod dominate") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+bs_plot
+```
+
+```{r}
+gc1 <- sample_avg_group %>%
+  filter(group_max == "Gadus chalcogrammus") %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(desc(`Gadus chalcogrammus`))
+
+my_order <- as.character(gc1$alternative_ID)
+
+gc2 <- gc1 %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+gc3 <- gc2 %>%
+  pivot_longer(cols = c(3:6), names_to = "taxon", values_to = "avg_prop") 
+  
+gc_plot <- gc3 %>%  
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample") + #,
+    #title = "pollock dominate") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+gc_plot
+```
+
+```{r}
+gm1 <- sample_avg_group %>%
+  filter(group_max == "Gadus macrocephalus") %>%
+  pivot_wider(names_from = "taxon", values_from = "avg_prop") %>%
+  dplyr::arrange(desc(`Gadus macrocephalus`))
+
+my_order <- as.character(gm1$alternative_ID)
+
+gm2 <- gm1 %>%
+  mutate(alternative_ID = factor(alternative_ID)) %>%
+  mutate(alternative_ID = fct_relevel(alternative_ID, my_order))
+
+gm3 <- gm2 %>%
+  pivot_longer(cols = c(3:6), names_to = "taxon", values_to = "avg_prop") 
+  
+gm_plot <- gm3 %>%  
+  ggplot(aes(x=alternative_ID, y=avg_prop, fill=taxon)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_bw() +
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample") + # ,
+    #title = "pacific cod dominate") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+gm_plot
+```
+save legend
+```{r}
+legend <- cowplot::get_legend(bs_plot)
+```
+
+
+```{r proportion_fig, fig.height=5, fig.width=6}
+plot_grid(gm_plot, bs_plot, gc_plot, legend, labels = c("A", "B", "C", ""), ncol = 2, rel_widths = c(1.5,1))
+```
+
+
+
+
+
+think of a way to include errors in proportions into a visual...? 
+
 
 next it would be great to have some metadata for these samples to know replicates and species proportions 
 
