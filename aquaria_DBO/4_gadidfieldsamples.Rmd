@@ -1,0 +1,209 @@
+---
+title: "gadid field application"
+author: "Kimberly Ledger"
+date: "2023-09-27"
+output: html_document
+---
+
+this script uses gadid metabarcoding reads from the DBO and GOApcod samples
+
+load libraries
+```{r, warning=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+library(ggOceanMaps)
+library(ggspatial)
+```
+
+load data
+```{r}
+## DBO metadata - includes ALL samples
+DBO_metadata <- read.csv("/home/kimberly.ledger/gadid_metabarcoding/gadid_aquariaDBO_metadata.csv") %>%
+  filter(project == "DBO")
+#illumina output changed "_" to "-"
+DBO_metadata$Sample_ID <- gsub("_", "-", DBO_metadata$Sample_ID)
+
+DBO_metadata$station_ID <- as.factor(DBO_metadata$station_ID)
+DBO_metadata$station <- as.factor(DBO_metadata$station)
+DBO_metadata$cast <- as.factor(DBO_metadata$cast)
+
+## DBO gadid reads - these have been decontaminated and zero read samples removed
+DBO_data <- read.csv("~/gadid_metabarcoding/gadid_fieldapplication/DBO_taxonreads_20230927.csv") %>%
+  select(!X)
+
+DBO_data$taxon <- as.factor(DBO_data$taxon)
+```
+
+start by plotting all of the DBO sampling locations on a map 
+```{r}
+DBO_sites <- DBO_metadata %>%
+  filter(sample_type == "sample") %>%
+  select(location1, station, longitude, latitude) %>%
+  unique() %>%
+  filter(!is.na(longitude))
+```
+
+add sites to map 
+```{r}
+map_with_sites <- basemap(c(-177, -159, 61, 73), bathymetry = FALSE, rotate = TRUE) + 
+  ggspatial::geom_spatial_point(data = DBO_sites, aes(x = longitude, y = latitude, color = station), size = 1) + 
+  labs(color = "Station")
+  
+
+#  theme(legend.key = element_rect(fill = "transparent"))
+
+map_with_sites
+```
+
+okay, where 1 and 2 are Bering Sea and 3 and 4 are Chukchi Sea. maybe i want to adjust colors, later. 
+
+
+now work with the read data  ---- the metadata associated with these reads has NOT been updated (as of 20230927) so i will just extract read info and join to the metadata loaded here. 
+also, i want to keep ALL the samples, even the ones with zero reads 
+```{r}
+DBO_metadata_mini <- DBO_metadata %>%
+  filter(sample_type == "sample") %>%
+  select(Sample_ID, station_ID, location1, station, cast, longitude, latitude)
+
+DBO_data_mini <- DBO_data %>%
+  select(Sample_ID, taxon, total_reads)
+
+DBO_all <- DBO_metadata_mini %>%
+  left_join(DBO_data_mini)
+```
+```{r}
+my_palette <- brewer.pal(3, "BuPu")
+```
+
+plot transect 1 Bering Sea samples   
+```{r}
+DBO_all %>%
+  #filter(location1 == "Bering Sea) %>%
+  filter(station == "1") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette[2:3]) +
+  facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "Bering Sea - Station 1")
+```
+
+plot transect 2 Bering Sea samples   
+```{r}
+DBO_all %>%
+  #filter(location1 == "Bering Sea) %>%
+  filter(station == "2") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette[2:3]) +
+  facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    axis.text.x = element_blank(),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "Bering Sea - Station 2")
+```
+
+plot transect 3 Chukchi Sea samples  
+```{r}
+DBO_all %>%
+  #filter(location1 == "Chukchi Sea") %>%
+  filter(station == 3) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette[2]) +
+  facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_blank(),
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "Chukchi Sea - Station 3")
+```
+
+
+plot transect 4 Chukchi Sea samples  
+```{r}
+DBO_all %>%
+  #filter(location1 == "Chukchi Sea") %>%
+  filter(station == 4) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette) +
+  facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_blank(),
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "Chukchi Sea - Station 4")
+```
+
+plot M8
+```{r}
+DBO_all %>%
+  filter(station_ID == "M8")%>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette[2]) +
+  #facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_blank(),
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "M8")
+```
+plot C2
+```{r}
+DBO_all %>%
+  filter(station_ID == "C2")%>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = my_palette[2]) +
+  #facet_wrap(~cast, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_blank(),
+    #axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()) + 
+  labs(title = "C2")
+```
+
+
+####### Now i want to dive into the GOApcod samples i did gadid metabarcoding with way back when... 
+```{r}
+
+```
+
+
+

@@ -1,0 +1,532 @@
+---
+title: "gadid aquaria and DBO"
+author: "Kimberly Ledger"
+date: "2023-09-26"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+```{r, warning=FALSE}
+library(tidyverse)
+```
+
+read in tables with reads assigned to species, post decontamination 
+```{r}
+runA <- read.csv("~/gadid_metabarcoding/20230918_gadid_aquariaDBO/20230918_taxon_reads.csv") %>%
+  select(!X) %>%
+  rename(site = tank_ID)  #set tank_ID as the site
+runB <- read.csv("~/gadid_metabarcoding/20230921_gadid_aquariaDBO/20230921_taxon_reads.csv") %>%
+  select(!X) %>%
+  rename(site = combined_column) %>%
+  select(!tank_ID) %>%
+  select(!station_ID)
+
+runA$alt_ID <- as.factor(runA$alt_ID)
+runB$alt_ID <- as.factor(runB$alt_ID)
+```
+
+combine 
+```{r}
+mydata <- bind_rows(runA, runB)
+```
+
+first, let's peek at the few samples that I ran on both MiSeq runs 
+```{r}
+both_runs_extID <- c("e02362", "e02363", "e02366", "e02370", "e02372", "e02373", "e02374", "e02375", "e02380")
+
+both_runs <- mydata %>%
+  filter(extraction_ID %in% both_runs_extID)
+```
+
+
+aquaria tank 2
+```{r}
+both_runs %>%
+  unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
+  group_by(Run_SampleID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  filter(site == 2) %>%
+  ggplot(aes(x=Run_SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~extraction_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+aquaria tank 39
+```{r}
+both_runs %>%
+  unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
+  group_by(Run_SampleID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  filter(site == 39) %>%
+  ggplot(aes(x=Run_SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~extraction_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+aquaria tank 89
+```{r}
+both_runs %>%
+  unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
+  group_by(Run_SampleID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  filter(site == 89) %>%
+  ggplot(aes(x=Run_SampleID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~extraction_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+cool. should probably do some statistical test but there is no reason so believe there is any differences due to the first and second miseq run.  
+
+just so sample duplicates do mess things up later on, i will remove the reads from the "B" miseq run for the duplicates
+```{r}
+both_runs_A <- both_runs %>%
+  filter(MiSeq_run == "A")
+
+mydata <- mydata %>%
+  filter(!extraction_ID %in% both_runs_extID) %>%
+  bind_rows(both_runs_A) 
+```
+
+### remove any reads that we know should not be there 
+(i.e. saffron cod from the tanks)
+
+```{r}
+mydata <- mydata %>%
+  filter(!taxon == "Eleginus gracilis")   ## i checked there were no saffron reads in DBO samples before doing this 
+```
+
+
+now let me go back to the decontamination step 5 (that i skipped earlier) that checks for dissimilarity between PCR replicates, now that reads are assigned to taxa and not ASV#s 
+
+are there any samples that have made it to this point that don't actually have any reads? 
+```{r}
+mydata %>%
+  group_by(Sample_ID) %>%
+  summarise(total_reads = sum(total_reads)) %>%
+  arrange(total_reads)
+```
+
+let's get rid of samples with no/few reads. 
+
+```{r}
+remove_5 <- c("e02165-B", "e02395-A", "e02395-C", "e02421-B", "e02421-C", "e02528-A", "e02538-B", "e02565-C",  "e02583-C", "e02593-A")
+
+temp_table <- mydata %>%
+  filter(!Sample_ID %in% remove_5)
+```
+
+instead of filtering by the biological replicates, i need to filter by the unique extractions.  the 'dist_to_centroid' function later on doesn't like the different number of replicates or that there are so many for a few.. not sure exactly. 
+
+how many pcr replicates does each extraction replicate have? 
+```{r}
+onerep <- temp_table %>%
+  group_by(extraction_ID) %>%
+  summarise(nrep = n_distinct(Sample_ID)) %>%
+  #filter(nrep == 2) # there are 13
+  filter(nrep == 1) # there are 6
+```
+
+remove the extraction with only one pcr rep from the data frame
+```{r}
+temp_table <- temp_table %>%
+  filter(!extraction_ID %in% onerep$extraction_ID)
+```
+
+NOTE: should i add back in these single replicate samples at some point later on?????
+
+
+first, i'll calculate an eDNA index --- okay, this does NOTHING... are read proportions already normalized??? 
+```{r}
+normalized <- temp_table %>%
+  group_by(Sample_ID) %>%
+  mutate(Tot = sum(total_reads),
+         Prop_reads = total_reads/Tot) %>%
+  dplyr::group_by(taxon) %>%
+  mutate(Colmax = max(Prop_reads, na.rm = TRUE),
+         Normalized_reads = Prop_reads/Colmax)
+
+#add a new sample id column that also includes the location - will use this for dissimilarity measures
+normalized <- normalized %>%
+  unite(site_biorep, site, alt_ID, sep = "_", remove = FALSE) %>%
+  unite(new_ID, site_biorep, pcr_replicate, sep = "-", remove = FALSE)
+```
+
+
+```{r}
+tibble_to_matrix <- function (tb) {
+  
+  tb %>%
+  #normalized %>%
+    group_by(new_ID, taxon) %>% 
+    summarise(nReads = sum(Normalized_reads)) %>% 
+    spread ( key = "taxon", value = "nReads", fill = 0) %>%
+    ungroup() -> matrix_1
+    samples <- pull (matrix_1, new_ID)
+    matrix_1[,-1] -> matrix_1
+    data.matrix(matrix_1) -> matrix_1
+    dimnames(matrix_1)[[1]] <- samples
+    vegdist(matrix_1) -> matrix_1
+}
+
+```
+
+
+```{r}
+all.distances.full <- tibble_to_matrix(normalized)
+
+# Do all samples have a name?
+summary(is.na(names(all.distances.full)))
+```
+
+make the pairwise distances a long table
+```{r}
+as_tibble(subset(melt(as.matrix(all.distances.full)))) -> all.distances.melted
+
+# Any major screw ups
+summary(is.na(all.distances.melted$value))
+
+# Now, create a three variables for all distances, they could be PCR replicates, BIOL replicates, or from the same site
+
+all.distances.melted %>%
+  separate (X1, into = "Bottle1", sep = "\\-", remove = FALSE) %>%
+  separate (Bottle1, into = "Site1", sep = "_", remove = FALSE) %>%
+  separate (X2, into ="Bottle2", sep = "\\-", remove = FALSE) %>%
+  separate (Bottle2, into = "Site2", sep = "_", remove = FALSE) %>%
+  mutate ( #Day.site1 = str_sub(Bottle1, start = 1, end = -2),
+           #Day.site2 = str_sub(Bottle2, start = 1, end = -2),
+           Distance.type = case_when( Bottle1 == Bottle2 ~ "PCR.replicates",
+                                      #Day.site1 == Day.site2 ~ "Biol.replicates",
+                                      Site1 == Site2 ~ "Same Site",
+                                      TRUE ~ "Different Site"
+                                     )) %>%
+  dplyr::select(Sample1 = X1, Sample2 = X2 , value , Distance.type) %>%
+  filter (Sample1 != Sample2) -> all.distances.to.plot
+
+# Checking all went well
+
+sapply(all.distances.to.plot, function(x) summary(is.na(x)))
+
+```
+
+```{r}
+all.distances.to.plot$Distance.type <- all.distances.to.plot$Distance.type  %>% fct_relevel("PCR.replicates", "Same Site")
+
+ggplot (all.distances.to.plot) +
+  geom_histogram (aes (fill = Distance.type, x = value, after_stat(ndensity)), position = "dodge",  alpha = 0.9, bins = 50) +
+  facet_wrap( ~ Distance.type) +
+  labs (x = "Pairwise dissimilarity", y = "density" ,
+        Distance.type = "Distance") +
+    guides (fill = "none")
+
+  #ggsave("visual.anova.png", dpi = "retina")
+```
+
+cool, pcr replicates look very similar. as do the biological replicates from the same site.  
+
+next i will follow what was done here:  (https://github.com/ramongallego/eDNA.and.Ocean.Acidification.Gallego.et.al.2020/blob/master/Scripts/Denoising.all.runs.Rmd) and instead of choosing outliers based on the pairwise distances, we can do a similar thing using the distance to centroid. 
+
+now identify and POSSIBLY discard outliers 
+```{r message=FALSE, warning=FALSE}
+normalized %>%
+  group_by(extraction_ID) %>% nest() -> nested.cleaning 
+
+nested.cleaning %>% 
+  mutate(matrix = map(data, tibble_to_matrix)) -> nested.cleaning
+
+nested.cleaning %>% mutate(ncomparisons = map(matrix, length)) -> nested.cleaning
+```
+
+```{r}
+dist_to_centroid <- function (x,y) {
+  
+  #biol <- rep(y, dim(x)[[1]])
+  biol <- rep(y, length(x))
+  
+  if (length(biol) == 1) {
+    output = rep(x[1]/2,2)
+    names(output) <- attr(x, "Labels")
+  }else{ 
+    
+  dispersion <- betadisper(x, group = biol)
+  output = dispersion$distances
+  }
+  output
+    }
+```
+
+```{r}
+nested.cleaning.temp <- nested.cleaning %>% 
+  mutate(distances = map2(matrix, extraction_ID, dist_to_centroid))
+
+all_distances <- nested.cleaning.temp %>%
+  unnest_longer(distances) %>%
+  dplyr::select(extraction_ID, distances_id, distances)
+
+hist(all_distances$distances)
+```
+
+calculate normal distribution of distances to centroid
+```{r}
+normparams <- MASS::fitdistr(all_distances$distances, "normal")$estimate                                      
+probs <- pnorm(all_distances$distances, normparams[1], normparams[2])
+outliers_centroid <- which(probs>0.99)
+
+discard_centroid <- all_distances$distances_id[outliers_centroid]
+discard_centroid
+```
+
+instead of filtering by a probability, maybe just use a threshold? 
+```{r}
+all_distances %>%
+  filter(distances > 0.1)
+```
+
+which extraction IDs were removed??
+```{r}
+to_discard <- data.frame(discard_centroid) %>%
+  separate(discard_centroid, into = c("site", "X"), sep = "_") 
+
+temp_table <- temp_table %>%
+  unite(X, alt_ID, pcr_replicate, sep ="-", remove = F)
+
+removed_step5 <- temp_table %>%
+  filter(X %in% to_discard$X)
+```
+
+maybe just plot a few. 
+
+these samples have at least one dissimilar pcr replicates 
+```{r}
+temp_table %>%
+  filter(site == 38) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+yeah so these samples (tank 38) may be too dissimilar to feel confident about using.... 
+
+
+site 41 - 358 A and C
+```{r}
+temp_table %>%
+  filter(site == 41) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+seems okay
+
+site 9- 320-A, 177-C
+```{r}
+temp_table %>%
+  filter(site == 9) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+maybe need to remove? 
+
+site DBO2.5
+```{r}
+temp_table %>%
+  filter(site == "DBO2.5") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+FOR NOW, i will use the 99 probability threshold for removing PCR replicates 
+
+output the samples that pass this filter
+```{r}
+mydata_filtered <- temp_table %>%
+  filter(!X %in% to_discard$X)
+```
+
+
+of what is remaining, which sites have the greatest dissimilarity?  
+- couldn't figure out how to modify the dist to centroid code so i'm going to look at the pairwise dissimilarity 
+
+```{r}
+site_dissimilarity <- all.distances.to.plot %>%
+  filter(Distance.type == "Same Site") %>%
+  filter(value > 0.4) %>%
+  select(Sample1) %>%
+  separate(Sample1, into = c("site", "alt_pcr"), sep = "_")
+```
+
+```{r}
+mydata_dissimilar_sites <- mydata_filtered %>%
+  filter(site %in% site_dissimilarity$site)
+```
+
+site 38
+```{r}
+mydata_dissimilar_sites %>%
+  filter(site == 38) %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+NOTE::: okay, need to fix metadata.  e02484 should be alt_ID 414 and tank ID 83.  changing this will probably remove site 86 from the "dissimilar" list 
+
+DBO1.2
+```{r}
+mydata_dissimilar_sites %>%
+  filter(site == "DBO1.2") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+site DBO2.5
+```{r}
+mydata_dissimilar_sites %>%
+  filter(site == "DBO2.5") %>%
+  group_by(Sample_ID) %>%
+  mutate(sum=sum(total_reads)) %>%
+  mutate(prop = total_reads/sum) %>%
+  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.position = "right",
+    legend.title = element_blank()
+  )  
+```
+
+okay, not sure if removing any sites is really necessary... maybe just have it incorporate into the confidence estimates.. 
+
+
+### NOW let's just work with the gadid aquaria samples to see if we can get tank proportion estimates ### 
+
+```{r}
+metadata <- read.csv("/home/kimberly.ledger/gadid_metabarcoding/gadid_aquariaDBO_metadata.csv")
+
+#illumina output changed "_" to "-"
+metadata$Sample_ID <- gsub("_", "-", metadata$Sample_ID)
+
+aquaria_data <- mydata_filtered %>%
+  left_join(metadata) %>%
+  filter(project == "aquaria") %>%
+  select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads)
+```
+
+first, any non-samples still in the data set? 
+```{r}
+aquaria_data %>%
+  filter(sample_type != "sample")
+```
+
+okay, just one field blank with a good number of pollock reads. might want to think about how we use this info? if we consider this along with the other samples filtered on the same day?? 
+
+i'll just remove them for now
+```{r}
+aquaria_data <- aquaria_data %>%
+  filter(sample_type == "sample")
+```
+
+i checked for similarity across pcr replicates earlier, but maybe we also want to do this for site/tank replicates for the aquaria samples? 
+
+
+
+DO MORE STUFF.......
+
+
+
+
+# DBO samples 
+```{r}
+DBO_data <- mydata_filtered %>%
+  left_join(metadata) %>%
+  filter(project == "DBO") %>%
+  select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads, location1, longitude, latitude, depth, time_of_day)
+
+#export to work with in another script
+write.csv(DBO_data, "gadid_fieldapplication/DBO_taxonreads_20230927.csv")
+```
+
+

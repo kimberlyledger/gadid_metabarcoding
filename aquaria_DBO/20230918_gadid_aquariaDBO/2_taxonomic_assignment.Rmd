@@ -1,0 +1,64 @@
+---
+title: "determine taxonomic assignments for asvs"
+author: "Kimberly Ledger"
+date: "2023-09-22"
+output: github_document
+---
+
+- analysis of gadid sequences from 20230918 sequencing run    
+- this script uses decontaminated read counts from my 20230922 run of the "1_ASV_decontamination.Rmd" 
+- this script uses the blastn taxonomic id's using the script "blastn_taxonomy.Rmd" from eDNA_metabarcoding - file was saved here: "/genetics/edna/workdir/gadids/20230918_aquaria/trimmed/filtered/outputs/asv_taxonomy_blastn.csv"
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+```{r, warning=FALSE}
+library(tidyverse)
+```
+
+
+read in decontaminated sample table
+```{r}
+decontam_reads <- read.csv("/home/kimberly.ledger/gadid_metabarcoding/20230918_gadid_aquariaDBO/20230918_decontamination_output_20230922.csv") %>%
+  #select(!sample_type) %>%   ## clean-up this table - remove irrelevant columns 
+  select(!loc.asv)
+
+asv_summary <- decontam_reads %>%
+  group_by(ASV) %>%
+  summarize(reads = sum(reads)) %>%
+  arrange(desc(reads))
+```
+
+read in the taxonomic id's 
+```{r}
+taxon_blastn <- read.csv("/genetics/edna/workdir/gadids/20230918_aquaria/trimmed/filtered/outputs/asv_taxonomy_blastn.csv") %>%
+  select(!X)
+```
+
+
+join the taxon id's to the ASVs in the decontaminated read dataset 
+```{r}
+my_asvs <- asv_summary$ASV
+
+decontam_asvs <- taxon_blastn %>%
+  filter(ASV %in% my_asvs)
+```
+
+**hmm still some saffron cod (the positive control) asvs... 
+
+
+```{r}
+join <- decontam_reads %>%
+  left_join(decontam_asvs, by = "ASV") %>%
+  filter(!is.na(taxon)) %>%   ##### remove ASVs without a species ID - check why there's no ID later! 
+  group_by(Sample_ID, sample_type, extraction_ID, pcr_replicate, alt_ID, tank_ID, taxon) %>%
+  summarize(total_reads = sum(reads)) %>%
+  mutate(MiSeq_run = "A")
+```
+
+output reads with taxonomic ID table
+```{r}
+write.csv(join, "/home/kimberly.ledger/gadid_metabarcoding/20230918_gadid_aquariaDBO/20230918_taxon_reads.csv")
+```
