@@ -1,25 +1,28 @@
 ---
-title: "gadid aquaria and DBO"
+title: "gadid aquaria"
 author: "Kimberly Ledger"
 date: "2023-09-26"
 output: github_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
+this code combines the decontaminated and taxon assigned reads for gadid metabarcoding of aquaria samples sequenced on 20230918 and 20230921. 
 
 load libraries
 ```{r, warning=FALSE}
 library(tidyverse)
+library(zCompositions) #for cmultRepl() 
+library(compositions) #for clr()
+library(vegan) #for vegdist()
+library(ggplot2)
+library(reshape2) #for melt()
 ```
 
 read in tables with reads assigned to species, post decontamination 
 ```{r}
-runA <- read.csv("~/gadid_metabarcoding/20230918_gadid_aquariaDBO/20230918_taxon_reads.csv") %>%
+runA <- read.csv("~/gadid_metabarcoding/aquaria_DBO/20230918_gadid_aquariaDBO/20230918_taxon_reads.csv") %>%
   select(!X) %>%
   rename(site = tank_ID)  #set tank_ID as the site
-runB <- read.csv("~/gadid_metabarcoding/20230921_gadid_aquariaDBO/20230921_taxon_reads.csv") %>%
+runB <- read.csv("~/gadid_metabarcoding/aquaria_DBO/20230921_gadid_aquariaDBO/20230921_taxon_reads.csv") %>%
   select(!X) %>%
   rename(site = combined_column) %>%
   select(!tank_ID) %>%
@@ -42,8 +45,7 @@ both_runs <- mydata %>%
   filter(extraction_ID %in% both_runs_extID)
 ```
 
-
-aquaria tank 2
+plot read proportions from aquaria tank 2
 ```{r}
 both_runs %>%
   unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
@@ -62,7 +64,7 @@ both_runs %>%
   )  
 ```
 
-aquaria tank 39
+plot read proportions from aquaria tank 39
 ```{r}
 both_runs %>%
   unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
@@ -81,7 +83,7 @@ both_runs %>%
   )  
 ```
 
-aquaria tank 89
+plot read proportions from aquaria tank 89
 ```{r}
 both_runs %>%
   unite(Run_SampleID, MiSeq_run, Sample_ID, sep = "_") %>%
@@ -100,7 +102,28 @@ both_runs %>%
   )  
 ```
 
-cool. should probably do some statistical test but there is no reason so believe there is any differences due to the first and second miseq run.  
+just to be extra convincing, let's run a PERMANOVA that assess the significance of differences of groups (in this case MiSeq runs)
+
+```{r}
+#step 1 - pivot data 
+both_runs_wide <- both_runs %>%
+  pivot_wider(names_from = "taxon", values_from = "total_reads") 
+
+#step 2 - break into metadata and reads 
+both_runs_meta <- both_runs_wide[,1:7]
+both_runs_reads <- both_runs_wide[,8:10]
+
+#step 3 - replace NA's with 0
+both_runs_reads <- both_runs_reads %>%
+  mutate(`Boreogadus saida` = ifelse(is.na(`Boreogadus saida`), 0, `Boreogadus saida`))
+
+#step 4 - add pseudocount to all data because zeros cannot be clr'd 
+both_runs_reads_no0 <- cmultRepl(both_runs_reads, output = 'p-counts')
+
+#step 5 - perform PERMANOVA
+adonis2(both_runs_reads_no0 ~ MiSeq_run, data = both_runs_meta, strat = both_runs_meta$site, permutations = 999, method = "aitchison")
+### need to think more deeply about how to use the 'strat' properly. 
+```
 
 just so sample duplicates do mess things up later on, i will remove the reads from the "B" miseq run for the duplicates
 ```{r}
@@ -192,7 +215,6 @@ tibble_to_matrix <- function (tb) {
     dimnames(matrix_1)[[1]] <- samples
     vegdist(matrix_1) -> matrix_1
 }
-
 ```
 
 
@@ -213,9 +235,9 @@ summary(is.na(all.distances.melted$value))
 # Now, create a three variables for all distances, they could be PCR replicates, BIOL replicates, or from the same site
 
 all.distances.melted %>%
-  separate (X1, into = "Bottle1", sep = "\\-", remove = FALSE) %>%
+  separate (Var1, into = "Bottle1", sep = "\\-", remove = FALSE) %>%
   separate (Bottle1, into = "Site1", sep = "_", remove = FALSE) %>%
-  separate (X2, into ="Bottle2", sep = "\\-", remove = FALSE) %>%
+  separate (Var2, into ="Bottle2", sep = "\\-", remove = FALSE) %>%
   separate (Bottle2, into = "Site2", sep = "_", remove = FALSE) %>%
   mutate ( #Day.site1 = str_sub(Bottle1, start = 1, end = -2),
            #Day.site2 = str_sub(Bottle2, start = 1, end = -2),
@@ -224,13 +246,11 @@ all.distances.melted %>%
                                       Site1 == Site2 ~ "Same Site",
                                       TRUE ~ "Different Site"
                                      )) %>%
-  dplyr::select(Sample1 = X1, Sample2 = X2 , value , Distance.type) %>%
+  dplyr::select(Sample1 = Var1, Sample2 = Var2 , value , Distance.type) %>%
   filter (Sample1 != Sample2) -> all.distances.to.plot
 
 # Checking all went well
-
 sapply(all.distances.to.plot, function(x) summary(is.na(x)))
-
 ```
 
 ```{r}
@@ -306,16 +326,16 @@ all_distances %>%
   filter(distances > 0.1)
 ```
 
-which extraction IDs were removed??
+which extraction IDs might be removed??
 ```{r}
-to_discard <- data.frame(discard_centroid) %>%
-  separate(discard_centroid, into = c("site", "X"), sep = "_") 
-
-temp_table <- temp_table %>%
-  unite(X, alt_ID, pcr_replicate, sep ="-", remove = F)
-
-removed_step5 <- temp_table %>%
-  filter(X %in% to_discard$X)
+# to_discard <- data.frame(discard_centroid) %>%
+#   separate(discard_centroid, into = c("site", "X"), sep = "_") 
+# 
+# temp_table <- temp_table %>%
+#   unite(X, alt_ID, pcr_replicate, sep ="-", remove = F)
+# 
+# removed_step5 <- temp_table %>%
+#   filter(X %in% to_discard$X)
 ```
 
 maybe just plot a few. 
@@ -358,7 +378,7 @@ temp_table %>%
     legend.title = element_blank()
   )  
 ```
-seems okay
+seems okay...
 
 site 9- 320-A, 177-C
 ```{r}
@@ -377,7 +397,6 @@ temp_table %>%
     legend.title = element_blank()
   )  
 ```
-maybe need to remove? 
 
 site DBO2.5
 ```{r}
@@ -397,102 +416,20 @@ temp_table %>%
   )  
 ```
 
-FOR NOW, i will use the 99 probability threshold for removing PCR replicates 
-
-output the samples that pass this filter
-```{r}
-mydata_filtered <- temp_table %>%
-  filter(!X %in% to_discard$X)
-```
-
-
-of what is remaining, which sites have the greatest dissimilarity?  
-- couldn't figure out how to modify the dist to centroid code so i'm going to look at the pairwise dissimilarity 
-
-```{r}
-site_dissimilarity <- all.distances.to.plot %>%
-  filter(Distance.type == "Same Site") %>%
-  filter(value > 0.4) %>%
-  select(Sample1) %>%
-  separate(Sample1, into = c("site", "alt_pcr"), sep = "_")
-```
-
-```{r}
-mydata_dissimilar_sites <- mydata_filtered %>%
-  filter(site %in% site_dissimilarity$site)
-```
-
-site 38
-```{r}
-mydata_dissimilar_sites %>%
-  filter(site == 38) %>%
-  group_by(Sample_ID) %>%
-  mutate(sum=sum(total_reads)) %>%
-  mutate(prop = total_reads/sum) %>%
-  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
-  geom_bar(stat = "identity") + 
-  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
-  theme_bw() + 
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 0.95),
-    legend.position = "right",
-    legend.title = element_blank()
-  )  
-```
-
-NOTE::: okay, need to fix metadata.  e02484 should be alt_ID 414 and tank ID 83.  changing this will probably remove site 86 from the "dissimilar" list 
-
-DBO1.2
-```{r}
-mydata_dissimilar_sites %>%
-  filter(site == "DBO1.2") %>%
-  group_by(Sample_ID) %>%
-  mutate(sum=sum(total_reads)) %>%
-  mutate(prop = total_reads/sum) %>%
-  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
-  geom_bar(stat = "identity") + 
-  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
-  theme_bw() + 
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 0.95),
-    legend.position = "right",
-    legend.title = element_blank()
-  )  
-```
-
-site DBO2.5
-```{r}
-mydata_dissimilar_sites %>%
-  filter(site == "DBO2.5") %>%
-  group_by(Sample_ID) %>%
-  mutate(sum=sum(total_reads)) %>%
-  mutate(prop = total_reads/sum) %>%
-  ggplot(aes(x=Sample_ID, y=prop, fill=taxon)) +
-  geom_bar(stat = "identity") + 
-  facet_wrap(~alt_ID, scales = 'free', ncol = 3) +
-  theme_bw() + 
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 0.95),
-    legend.position = "right",
-    legend.title = element_blank()
-  )  
-```
-
-okay, not sure if removing any sites is really necessary... maybe just have it incorporate into the confidence estimates.. 
-
+FOR NOW, I will NOT remove any pcr replicates because of dissimilarity.  i will just try to incorporate that variation into confidence estimates later on.  
 
 ### NOW let's just work with the gadid aquaria samples to see if we can get tank proportion estimates ### 
 
 ```{r}
-metadata <- read.csv("/home/kimberly.ledger/gadid_metabarcoding/gadid_aquariaDBO_metadata.csv")
+metadata <- read.csv("/home/kimberly.ledger/gadid_metabarcoding/aquaria_DBO/gadid_aquariaDBO_metadata.csv")
 
 #illumina output changed "_" to "-"
 metadata$Sample_ID <- gsub("_", "-", metadata$Sample_ID)
 
-aquaria_data <- mydata_filtered %>%
+aquaria_data <- mydata %>%
   left_join(metadata) %>%
   filter(project == "aquaria") %>%
-  select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads)
+  dplyr::select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads)
 ```
 
 first, any non-samples still in the data set? 
@@ -509,24 +446,29 @@ aquaria_data <- aquaria_data %>%
   filter(sample_type == "sample")
 ```
 
-i checked for similarity across pcr replicates earlier, but maybe we also want to do this for site/tank replicates for the aquaria samples? 
-
-
-
-DO MORE STUFF.......
-
-
-
-
-# DBO samples 
+output the DBO samples 
 ```{r}
-DBO_data <- mydata_filtered %>%
+DBO_data <- mydata %>%
   left_join(metadata) %>%
   filter(project == "DBO") %>%
-  select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads, location1, longitude, latitude, depth, time_of_day)
+  dplyr::select(Sample_ID, sample_type, extraction_ID, alt_ID, pcr_replicate, site, taxon, total_reads, location1, longitude, latitude, depth, time_of_day)
 
 #export to work with in another script
-write.csv(DBO_data, "gadid_fieldapplication/DBO_taxonreads_20230927.csv")
+#write.csv(DBO_data, "DBO_taxonreads_20230927.csv")
 ```
+
+
+#### working to summarize the aquaria data #### 
+
+okay, my goal is to estimate the proportion of reads per tank (summarize pcr and biological replicates) and hopefully include some sort of 95% confidence interval, to then compare to the biomass proportions i get from Tom. 
+
+i think i will use the Quantitative Metabarcoding code (that allows me to incorporate amplification efficiency estimates from the mock communities, if i want to)
+
+
+
+
+
+
+
 
 
